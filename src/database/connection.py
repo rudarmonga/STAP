@@ -72,14 +72,12 @@ class DatabaseConnection:
         """
         Initialize the database with required schema.
         
-        This method creates the database file and basic schema if it doesn't exist.
-        Future schema migrations will be handled here.
+        This method creates the database file and complete STAP schema if it doesn't exist.
         """
         logger.info(f"Initializing database at: {self._db_path}")
         
         with self.get_connection() as conn:
-            # Create basic schema
-            # This is a minimal foundation - actual STAP schema will be added later
+            # Create schema version table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS schema_version (
                     version INTEGER PRIMARY KEY,
@@ -87,14 +85,103 @@ class DatabaseConnection:
                 )
             """)
             
-            # Insert initial version if table is empty
-            cursor = conn.execute("SELECT COUNT(*) FROM schema_version")
-            if cursor.fetchone()[0] == 0:
-                conn.execute("INSERT INTO schema_version (version) VALUES (1)")
+            # Check current schema version
+            cursor = conn.execute("SELECT MAX(version) FROM schema_version")
+            current_version = cursor.fetchone()[0]
+            
+            if current_version is None or current_version < 2:
+                self._create_stap_schema(conn)
+                conn.execute("INSERT INTO schema_version (version) VALUES (2)")
                 conn.commit()
-                logger.info("Database schema initialized to version 1")
+                logger.info("Database schema initialized to version 2")
             else:
-                logger.info("Database schema already exists")
+                logger.info(f"Database schema already exists at version {current_version}")
+    
+    def _create_stap_schema(self, conn) -> None:
+        """Create the complete STAP database schema."""
+        logger.info("Creating STAP database schema")
+        
+        # Sellers table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sellers (
+                seller_id TEXT PRIMARY KEY,
+                seller_name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                region TEXT NOT NULL,
+                join_date TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('active', 'inactive', 'suspended'))
+            )
+        """)
+        
+        # Orders table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS orders (
+                order_id TEXT PRIMARY KEY,
+                seller_id TEXT NOT NULL,
+                order_date TEXT NOT NULL,
+                category TEXT NOT NULL,
+                region TEXT NOT NULL,
+                order_value REAL NOT NULL CHECK(order_value >= 0),
+                delivery_days INTEGER CHECK(delivery_days >= 0),
+                status TEXT NOT NULL CHECK(status IN ('completed', 'cancelled', 'pending', 'refunded')),
+                FOREIGN KEY (seller_id) REFERENCES sellers(seller_id)
+            )
+        """)
+        
+        # Returns table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS returns (
+                return_id TEXT PRIMARY KEY,
+                order_id TEXT NOT NULL,
+                seller_id TEXT NOT NULL,
+                return_date TEXT NOT NULL,
+                return_reason TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('approved', 'rejected', 'pending')),
+                FOREIGN KEY (order_id) REFERENCES orders(order_id),
+                FOREIGN KEY (seller_id) REFERENCES sellers(seller_id)
+            )
+        """)
+        
+        # Ratings table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ratings (
+                rating_id TEXT PRIMARY KEY,
+                seller_id TEXT NOT NULL,
+                order_id TEXT,
+                rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+                rating_date TEXT NOT NULL,
+                FOREIGN KEY (seller_id) REFERENCES sellers(seller_id),
+                FOREIGN KEY (order_id) REFERENCES orders(order_id)
+            )
+        """)
+        
+        # Reviews table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS reviews (
+                review_id TEXT PRIMARY KEY,
+                seller_id TEXT NOT NULL,
+                order_id TEXT,
+                review_date TEXT NOT NULL,
+                review_text TEXT NOT NULL,
+                sentiment TEXT CHECK(sentiment IN ('positive', 'neutral', 'negative')),
+                sentiment_score REAL CHECK(sentiment_score BETWEEN -1 AND 1),
+                FOREIGN KEY (seller_id) REFERENCES sellers(seller_id),
+                FOREIGN KEY (order_id) REFERENCES orders(order_id)
+            )
+        """)
+        
+        # Create indexes for performance
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_seller_id ON orders(seller_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_order_date ON orders(order_date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_category ON orders(category)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_returns_seller_id ON returns(seller_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_returns_order_id ON returns(order_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ratings_seller_id ON ratings(seller_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ratings_rating_date ON ratings(rating_date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_reviews_seller_id ON reviews(seller_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_reviews_sentiment ON reviews(sentiment)")
+        
+        logger.info("STAP schema created successfully")
     
     def database_exists(self) -> bool:
         """Check if the database file exists."""
@@ -109,6 +196,28 @@ class DatabaseConnection:
             cursor = conn.execute("SELECT MAX(version) FROM schema_version")
             result = cursor.fetchone()
             return result[0] if result and result[0] else None
+    
+    def reset_database(self) -> None:
+        """
+        Reset the database by dropping all tables and reinitializing schema.
+        
+        This is useful for development and testing when you want a fresh start.
+        """
+        logger.warning(f"Resetting database at: {self._db_path}")
+        
+        with self.get_connection() as conn:
+            # Drop all tables in correct order (respecting foreign keys)
+            conn.execute("DROP TABLE IF EXISTS reviews")
+            conn.execute("DROP TABLE IF EXISTS ratings")
+            conn.execute("DROP TABLE IF EXISTS returns")
+            conn.execute("DROP TABLE IF EXISTS orders")
+            conn.execute("DROP TABLE IF EXISTS sellers")
+            conn.execute("DROP TABLE IF EXISTS schema_version")
+            conn.commit()
+        
+        # Reinitialize schema
+        self.initialize_database()
+        logger.info("Database reset successfully")
 
 
 # Global database connection instance

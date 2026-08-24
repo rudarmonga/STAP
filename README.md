@@ -22,16 +22,25 @@ STAP/
 │   └── config.toml         # Streamlit configuration
 ├── data/                   # Database directory (created at runtime)
 ├── scripts/
-│   └── init_db.py          # Database initialization script
+│   ├── init_db.py          # Database initialization script
+│   └── seed_data.py        # Synthetic data seeding script
 ├── src/
 │   ├── analytics/          # Analytics and business logic
 │   ├── config/             # Configuration management
 │   ├── data/               # Data processing and synthetic data
+│   │   ├── synthetic.py    # Synthetic data generator
+│   │   └── validation.py   # Data validation layer
 │   ├── database/           # Database layer
+│   │   └── connection.py   # SQLite connection and schema
 │   ├── reporting/          # Reporting functionality
 │   ├── ui/                 # Streamlit UI components
 │   └── utils/              # Utility functions
 ├── tests/                  # Test suite
+│   ├── test_config.py      # Configuration tests
+│   ├── test_database.py    # Database tests
+│   ├── test_imports.py     # Import validation tests
+│   ├── test_synthetic_data.py  # Synthetic data generation tests
+│   └── test_validation.py  # Data validation tests
 ├── .env.example            # Environment variables template
 ├── .gitignore              # Git ignore rules
 ├── pytest.ini              # pytest configuration
@@ -76,6 +85,12 @@ STAP/
    python scripts/init_db.py
    ```
    This creates the SQLite database at the configured path (default: `data/stap.db`).
+
+6. **Seed the database with synthetic data**
+   ```bash
+   python scripts/seed_data.py
+   ```
+   This generates and inserts realistic marketplace data into the database.
 
 ## Running the Application
 
@@ -131,11 +146,130 @@ STAP uses SQLite for data storage. The database is automatically initialized on 
 
 ### Database Schema
 
-The current schema version is tracked in the `schema_version` table. Future schema migrations will be handled through the database layer.
+The STAP database schema (version 2) includes the following tables:
+
+**sellers**
+- seller_id (TEXT, PRIMARY KEY)
+- seller_name (TEXT, NOT NULL)
+- category (TEXT, NOT NULL) - Electronics, Clothing, Home & Garden, Sports, Books, Toys, Automotive, Health & Beauty, Food & Grocery, Office Supplies
+- region (TEXT, NOT NULL) - North America, Europe, Asia Pacific, Latin America, Middle East, Africa
+- join_date (TEXT, NOT NULL)
+- status (TEXT, NOT NULL) - active, inactive, suspended
+
+**orders**
+- order_id (TEXT, PRIMARY KEY)
+- seller_id (TEXT, NOT NULL, FOREIGN KEY → sellers)
+- order_date (TEXT, NOT NULL)
+- category (TEXT, NOT NULL)
+- region (TEXT, NOT NULL)
+- order_value (REAL, NOT NULL)
+- delivery_days (INTEGER)
+- status (TEXT, NOT NULL) - completed, cancelled, pending, refunded
+
+**returns**
+- return_id (TEXT, PRIMARY KEY)
+- order_id (TEXT, NOT NULL, FOREIGN KEY → orders)
+- seller_id (TEXT, NOT NULL, FOREIGN KEY → sellers)
+- return_date (TEXT, NOT NULL)
+- return_reason (TEXT, NOT NULL)
+- status (TEXT, NOT NULL) - approved, rejected, pending
+
+**ratings**
+- rating_id (TEXT, PRIMARY KEY)
+- seller_id (TEXT, NOT NULL, FOREIGN KEY → sellers)
+- order_id (TEXT, FOREIGN KEY → orders)
+- rating (INTEGER, NOT NULL, CHECK 1-5)
+- rating_date (TEXT, NOT NULL)
+
+**reviews**
+- review_id (TEXT, PRIMARY KEY)
+- seller_id (TEXT, NOT NULL, FOREIGN KEY → sellers)
+- order_id (TEXT, FOREIGN KEY → orders)
+- review_date (TEXT, NOT NULL)
+- review_text (TEXT, NOT NULL)
+- sentiment (TEXT) - positive, neutral, negative
+- sentiment_score (REAL, CHECK -1 to 1)
+
+The schema version is tracked in the `schema_version` table. Future schema migrations will be handled through the database layer.
 
 ### Database Location
 
 By default, the database is stored at `data/stap.db` in the project root. This can be customized via the `STAP_DATABASE_PATH` environment variable.
+
+## Synthetic Data Generation
+
+STAP uses a synthetic data generator to create realistic marketplace data without external dependencies. This ensures the application can be deployed and tested without requiring access to real marketplace data.
+
+### Data Generation Approach
+
+The synthetic data generator uses a deterministic, reproducible approach:
+
+- **Seed-based Randomness**: Uses a fixed random seed (default: 42) for reproducibility
+- **Performance Profiles**: Sellers are assigned performance profiles (healthy, average, declining, high_risk) that influence their behavior
+- **Historical Distribution**: Orders are distributed using weighted random distributions that mimic real marketplace patterns
+- **Realistic Relationships**: Returns, ratings, and reviews are linked to existing orders and sellers
+- **Business Logic Integration**: High-risk sellers have higher return rates, declining sellers have worsening ratings over time, etc.
+
+### Default Dataset Sizes
+
+The default synthetic dataset generation creates:
+- **100 sellers** across 10 categories and 6 regions
+- **5,000 orders** distributed over 1 year (configurable)
+- **~400 returns** (8% return rate, realistic for e-commerce)
+- **~3,000 ratings** (60% of orders have ratings)
+- **~2,000 reviews** (40% of orders have reviews)
+
+### Data Generation Commands
+
+**Initialize database (creates schema):**
+```bash
+python scripts/init_db.py
+```
+
+**Reset database (drops and recreates schema):**
+```bash
+python scripts/init_db.py --reset
+```
+
+**Generate and seed synthetic data:**
+```bash
+python scripts/seed_data.py
+```
+
+**Generate custom dataset size:**
+```bash
+python scripts/seed_data.py --sellers 200 --orders 10000 --days 365
+```
+
+**Force re-seed (replaces existing data):**
+```bash
+python scripts/seed_data.py --reset
+```
+
+**Complete fresh setup workflow:**
+```bash
+python scripts/init_db.py --reset
+python scripts/seed_data.py --reset
+```
+
+### Data Validation
+
+All synthetic data is validated before insertion into the database. Validation checks include:
+
+- Required fields are present
+- Seller IDs are valid and unique
+- Foreign-key relationships are valid
+- Ratings are within the 1-5 range
+- Sentiment scores are within -1 to 1 range
+- Dates are valid and follow chronological constraints
+- No impossible negative quantities/values
+- No unexpected null values in required fields
+
+If invalid data is detected, the seeding process fails clearly rather than silently inserting corrupt data.
+
+### Idempotent Seeding
+
+The data seeding process is idempotent - running it multiple times will not create uncontrolled duplicates. The script uses `INSERT OR REPLACE` statements, so re-running will update existing records rather than creating duplicates. For a complete reset, use the `--reset` flag.
 
 ## Deployment
 
@@ -155,6 +289,18 @@ By default, the database is stored at `data/stap.db` in the project root. This c
 - No external data dependencies (synthetic data is generated internally)
 - Environment variables must be documented in `.env.example`
 - Application must start without errors
+- Database initialization and data seeding must work in the deployment environment
+
+### Deployment Workflow
+
+When deploying to a fresh environment (e.g., Streamlit Cloud):
+
+1. The application will automatically create the database directory
+2. Run the database initialization script as part of deployment setup
+3. Run the data seeding script to populate the database with synthetic data
+4. The application will then connect to the initialized database
+
+For automated deployments, you may want to add these initialization steps to your deployment script or startup process.
 
 ## Current Features (Foundation)
 
@@ -164,6 +310,19 @@ The current version provides the foundation for future analytics:
 - **Seller Analytics**: Foundation page for individual seller analysis
 - **Reports**: Foundation page for report generation and export
 - **Settings**: Configuration page with current settings display
+
+## Current Features (Foundation)
+
+The current version provides the foundation for future analytics:
+
+- **Dashboard**: Foundation page for marketplace-level analytics
+- **Seller Analytics**: Foundation page for individual seller analysis
+- **Reports**: Foundation page for report generation and export
+- **Settings**: Configuration page with current settings display
+- **Synthetic Data Generation**: Complete marketplace data generation with realistic seller performance patterns
+- **Data Validation**: Comprehensive validation layer ensuring data quality
+- **Database Schema**: Complete STAP schema supporting sellers, orders, returns, ratings, and reviews
+- **Idempotent Seeding**: Safe, repeatable database seeding without duplicate data
 
 ## Future Features
 
@@ -210,6 +369,22 @@ If database initialization fails:
 2. Check file permissions
 3. Verify `STAP_DATABASE_PATH` in `.env`
 
+### Data Seeding Errors
+
+If data seeding fails:
+1. Ensure the database has been initialized with `python scripts/init_db.py`
+2. Check that the schema version is at least 2
+3. Review validation errors in the logs
+4. Ensure the synthetic data seed is set correctly in `.env`
+
+### Validation Errors
+
+If you encounter validation errors during data seeding:
+1. Check the error messages in the logs
+2. Ensure the synthetic data generator is working correctly
+3. Verify that performance profiles are being assigned correctly
+4. Check for duplicate IDs or invalid foreign key references
+
 ### Import Errors
 
 If you encounter import errors:
@@ -232,4 +407,3 @@ If Streamlit fails to start:
 ## Contributing
 
 [Add contribution guidelines here]
-# STAP
