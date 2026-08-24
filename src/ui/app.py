@@ -41,6 +41,10 @@ def main():
     st.title(settings.app_title)
     st.markdown("---")
     
+    # Initialize session state for navigation
+    if 'page' not in st.session_state:
+        st.session_state.page = "Dashboard"
+    
     # Sidebar navigation
     with st.sidebar:
         st.header("Navigation")
@@ -48,8 +52,12 @@ def main():
         page = st.radio(
             "Select Page",
             ["Dashboard", "Seller Analytics", "Reports", "Settings"],
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            key="nav_radio"
         )
+        
+        # Update session state when navigation changes
+        st.session_state.page = page
         
         st.markdown("---")
         st.subheader("About")

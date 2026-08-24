@@ -26,6 +26,10 @@ STAP/
 │   └── seed_data.py        # Synthetic data seeding script
 ├── src/
 │   ├── analytics/          # Analytics and business logic
+│   │   ├── config.py       # Trust Score configuration and weights
+│   │   ├── engine.py       # Core analytics engine
+│   │   ├── models.py       # Analytics data models
+│   │   └── normalization.py # Metric normalization functions
 │   ├── config/             # Configuration management
 │   ├── data/               # Data processing and synthetic data
 │   │   ├── synthetic.py    # Synthetic data generator
@@ -36,6 +40,9 @@ STAP/
 │   ├── ui/                 # Streamlit UI components
 │   └── utils/              # Utility functions
 ├── tests/                  # Test suite
+│   ├── test_analytics_config.py     # Analytics configuration tests
+│   ├── test_analytics_engine.py     # Analytics engine tests
+│   ├── test_analytics_normalization.py  # Normalization function tests
 │   ├── test_config.py      # Configuration tests
 │   ├── test_database.py    # Database tests
 │   ├── test_imports.py     # Import validation tests
@@ -271,6 +278,109 @@ If invalid data is detected, the seeding process fails clearly rather than silen
 
 The data seeding process is idempotent - running it multiple times will not create uncontrolled duplicates. The script uses `INSERT OR REPLACE` statements, so re-running will update existing records rather than creating duplicates. For a complete reset, use the `--reset` flag.
 
+## Analytics Engine
+
+STAP includes a comprehensive analytics engine that calculates seller performance metrics, Trust Scores, and risk classifications.
+
+### Trust Score
+
+The Trust Score is a deterministic metric (0-100 scale) that assesses seller performance based on five weighted components:
+
+1. **Rating Component (30%)**: Customer satisfaction through product ratings (1-5 scale)
+2. **Return Component (25%)**: Product quality through return behavior
+3. **Sentiment Component (20%)**: Customer sentiment from review text analysis
+4. **Operational Component (15%)**: Delivery performance and efficiency
+5. **Reliability Component (10%)**: Order fulfillment reliability
+
+**Risk Classification:**
+- **Healthy (80-100)**: Strong performance metrics
+- **Monitor (60-79)**: Requires attention and monitoring
+- **High Risk (0-59)**: Significant performance issues
+
+For detailed Trust Score documentation, see [TRUST_SCORE_DOCUMENTATION.md](TRUST_SCORE_DOCUMENTATION.md).
+
+### Seller Metrics
+
+The analytics engine calculates comprehensive seller metrics:
+
+**Order Metrics:**
+- Total orders, completed orders, cancelled orders
+- Total revenue, average order value
+- Completion rate, cancellation rate
+
+**Return Metrics:**
+- Total returns, approved/rejected returns
+- Return rate (returns / total orders)
+
+**Rating Metrics:**
+- Total ratings, average rating
+- Rating distribution (1-5 stars)
+- Five-star and one-star percentages
+
+**Review Metrics:**
+- Total reviews, positive/neutral/negative reviews
+- Negative review percentage
+- Average sentiment score
+
+**Operational Metrics:**
+- Average delivery days
+- On-time delivery rate
+- Total delivery days
+
+### Time-Based Analytics
+
+The analytics engine supports flexible time filtering:
+
+- All time
+- Last 30 days
+- Last 90 days
+- Last 6 months
+- Last 1 year
+- Last 3 years
+- Last 5 years
+- Custom date range
+
+### Marketplace Analytics
+
+The engine also provides marketplace-level aggregated metrics:
+
+- Total sellers, active sellers
+- Risk distribution (healthy/monitor/high-risk)
+- Total orders, total revenue
+- Overall return rate, average rating
+- Overall review sentiment
+- Average Trust Score
+
+### Using the Analytics Engine
+
+```python
+from src.analytics import analytics_engine, DateRange
+
+# Calculate seller analytics
+seller_analytics = analytics_engine.calculate_seller_analytics(
+    seller_id="SELLER-12345",
+    date_range=DateRange.LAST_90_DAYS
+)
+
+# Calculate marketplace analytics
+marketplace_analytics = analytics_engine.calculate_marketplace_analytics(
+    date_range=DateRange.LAST_30_DAYS
+)
+
+# Rank sellers by Trust Score
+top_sellers = analytics_engine.rank_sellers_by_trust_score(limit=10)
+```
+
+### Analytics Configuration
+
+Trust Score weights and risk thresholds are configurable in `src/analytics/config.py`:
+
+- **TrustScoreWeights**: Component weights (must sum to 1.0)
+- **RiskThresholds**: Risk classification boundaries
+- **DataSufficiencyThresholds**: Minimum data requirements
+
+To modify the Trust Score calculation, update the weights in the configuration file.
+
 ## Deployment
 
 ### Streamlit Cloud Deployment
@@ -310,36 +420,23 @@ The current version provides the foundation for future analytics:
 - **Seller Analytics**: Foundation page for individual seller analysis
 - **Reports**: Foundation page for report generation and export
 - **Settings**: Configuration page with current settings display
-
-## Current Features (Foundation)
-
-The current version provides the foundation for future analytics:
-
-- **Dashboard**: Foundation page for marketplace-level analytics
-- **Seller Analytics**: Foundation page for individual seller analysis
-- **Reports**: Foundation page for report generation and export
-- **Settings**: Configuration page with current settings display
 - **Synthetic Data Generation**: Complete marketplace data generation with realistic seller performance patterns
 - **Data Validation**: Comprehensive validation layer ensuring data quality
 - **Database Schema**: Complete STAP schema supporting sellers, orders, returns, ratings, and reviews
 - **Idempotent Seeding**: Safe, repeatable database seeding without duplicate data
+- **Analytics Engine**: Core business logic for seller performance calculation and Trust Score computation
 
 ## Future Features
 
 The following features will be implemented in future iterations:
 
-- Marketplace-level performance monitoring
-- Seller-level analytics and metrics
-- Seller Trust Score calculation
-- Seller risk classification
-- Historical performance trends
-- Customer rating and review sentiment analysis
-- Return-rate analysis
-- Seller rankings
-- High-risk seller identification
+- Dashboard UI with marketplace-level KPIs
+- Seller analytics page with detailed performance charts
+- Historical performance trends and charts
+- Seller rankings and leaderboards
 - Filtering and search functionality
 - CSV, Excel, and PDF reporting
-- Daily data refresh
+- Daily data refresh automation
 
 ## Development
 
@@ -347,9 +444,11 @@ The following features will be implemented in future iterations:
 
 1. **Database changes**: Update schema in `src/database/connection.py`
 2. **Business logic**: Add to `src/analytics/`
-3. **UI components**: Add pages to `src/ui/pages.py`
-4. **Data processing**: Add to `src/data/`
-5. **Tests**: Add corresponding tests in `tests/`
+3. **Analytics calculations**: Update engine in `src/analytics/engine.py`
+4. **Trust Score changes**: Update config in `src/analytics/config.py`
+5. **UI components**: Add pages to `src/ui/pages.py`
+6. **Data processing**: Add to `src/data/`
+7. **Tests**: Add corresponding tests in `tests/`
 
 ### Code Style
 
@@ -384,6 +483,15 @@ If you encounter validation errors during data seeding:
 2. Ensure the synthetic data generator is working correctly
 3. Verify that performance profiles are being assigned correctly
 4. Check for duplicate IDs or invalid foreign key references
+
+### Analytics Errors
+
+If you encounter analytics calculation errors:
+1. Ensure the database has been seeded with synthetic data
+2. Check that the schema version is at least 2
+3. Verify that seller IDs exist in the database
+4. Review the analytics logs for specific metric calculation errors
+5. Ensure date ranges are valid when using time-based analytics
 
 ### Import Errors
 

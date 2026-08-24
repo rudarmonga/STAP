@@ -43,6 +43,26 @@ def test_import_analytics():
     """Test that analytics module can be imported."""
     from src import analytics
     assert analytics is not None
+    
+    # Test that major analytics components are available
+    from src.analytics import (
+        AnalyticsEngine,
+        analytics_engine,
+        SellerAnalytics,
+        MarketplaceAnalytics,
+        RiskLevel,
+        DateRange,
+        TrustScoreWeights,
+        DEFAULT_TRUST_SCORE_WEIGHTS
+    )
+    assert AnalyticsEngine is not None
+    assert analytics_engine is not None
+    assert SellerAnalytics is not None
+    assert MarketplaceAnalytics is not None
+    assert RiskLevel is not None
+    assert DateRange is not None
+    assert TrustScoreWeights is not None
+    assert DEFAULT_TRUST_SCORE_WEIGHTS is not None
 
 
 def test_import_reporting():
